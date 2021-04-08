@@ -18,10 +18,13 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.utils import dboxes300_coco, COCODetection
+from src.katech import KATECHDetection
 from src.utils import SSDTransformer
 from src.coco import COCO
 #DALI import
 from src.coco_pipeline import COCOPipeline, DALICOCOIterator
+
+
 
 def get_train_loader(args, local_seed):
     train_annotate = os.path.join(args.data, "annotations/instances_train2017.json")
@@ -36,6 +39,12 @@ def get_train_loader(args, local_seed):
     train_loader = DALICOCOIterator(train_pipe, 118287 / args.N_gpu)
     return train_loader
 
+def get_dataset_KATECH(args):
+    KATECH_root = args.data
+    dboxes = dboxes300_coco()
+    trans = SSDTransformer(dboxes, (300,300), val=True)
+    ds_katech = KATECHDetection(KATECH_root, trans)
+    return ds_katech
 
 def get_val_dataset(args):
     dboxes = dboxes300_coco()

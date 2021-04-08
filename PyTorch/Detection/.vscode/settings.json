@@ -1,0 +1,4 @@
+{
+    "python.pythonPath": "/home/dklee/anaconda3/envs/tf-ssd/bin/python",
+    "python.analysis.extraPaths": ["./SSD", "./SSD/src"],
+}
