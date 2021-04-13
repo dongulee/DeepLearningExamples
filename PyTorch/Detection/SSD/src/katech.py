@@ -90,7 +90,7 @@ class KATECHDetection(data.Dataset):
                 self.datapoints[key_dir][item_key]=items
         
         self.canonical_datapoints = []
-        Datapoint = namedtuple('Datapoint', ['vid', 'timestamp', 'imgfilepath', 'lblfilepath', 'scenario'])
+        # Datapoint = namedtuple('Datapoint', ['vid', 'timestamp', 'imgfilepath', 'lblfilepath', 'scenario'])
 
         for (k,v) in self.datapoints.items(): 
             # e.g. 
@@ -135,7 +135,7 @@ class KATECHDetection(data.Dataset):
                     # imgfilepath = os.path.abspath(imgfilepath)
                     # lblfilepath = os.path.abspath(lblfilepath)
                     self.canonical_datapoints.append(
-                        Datapoint(vid, timestamp, imgfilepath, lblfilepath, scenario)
+                        {'vid': vid, 'timestamp':timestamp, 'imgfilepath':imgfilepath, 'lblfilepath': lblfilepath, 'scenario': scenario}
                     )
 
 
@@ -151,9 +151,9 @@ class KATECHDetection(data.Dataset):
         self.label_info = {} # label number -> label name
         remove_dps = []
         for dp in self.canonical_datapoints:
-            if dp.lblfilepath=='NULL':
+            if dp['lblfilepath']=='NULL':
                 continue
-            with open(dp.lblfilepath, 'r') as lbl:
+            with open(dp['lblfilepath'], 'r') as lbl:
                 ordered = xmltodict.parse(lbl.read())
                 dict_data = json.loads(json.dumps(ordered))['annotation']
                 if 'object' not in dict_data.keys():
@@ -172,7 +172,7 @@ class KATECHDetection(data.Dataset):
                 bbox_sizes, bbox_labels = to_COCO_bbox(dict_data['object'], width, height)
                 for lbl in bbox_labels:
                     labels[lbl]=True
-                fullpath = os.path.join(dp.vid, dict_data['folder'], dict_data['filename'])
+                fullpath = os.path.join(dp['vid'], dict_data['folder'], dict_data['filename'])
                 self.images[dict_data['filename']] = (dict_data['filename'], (width, height), bbox_sizes, bbox_labels, fullpath)
         for x in remove_dps:
             self.canonical_datapoints.remove(x)
