@@ -19,21 +19,27 @@ def analyze_key(key):
         scenario = 'NULL'
     timestamp = date[:4]+'-'+date[4:6]+'-'+date[6:8]+ ' ' + time[:2]+':'+time[2:4]+':'+time[4:6]
     return timestamp, scenario
-
+def convert_timestamp(timestamp):
+    year, month, day = timestamp[:4], timestamp[4:6], timestamp[6:8]
+    hh, mm, ss = timestamp[9:11], timestamp[11:13], timestamp[13:15]
+    sec_bias = int(timestamp[16:])/30
+    ss = str(int(ss)+sec_bias)
+    ts = year+'-'+month+'-'+day+' '+hh+':'+mm+':'+ss
+    return ts
 def to_COCO_bbox(bboxes, width, height):
     # KATECH bbox (parsed to dictionary from xml) style
-    # from List of object: {'name': ABC, ... , 'bndbox':{'xmin', 'ymin', 'xmax', 'ymax'} (LBRT) style }
+    # from List of object: {'name': ABC, ... , 'bndbox':{'xmin', 'ymin', 'xmax', 'ymax'} (LTRB) style }
     # to  List of bbox_size and list of bbox_label
     bbox_sizes = []
     bbox_labels = []
     width = int(width)
     height = int(height)
     for bbox in bboxes:
-        l, b, r, t = bbox['bndbox']['xmin'], bbox['bndbox']['ymin'], bbox['bndbox']['xmax'], bbox['bndbox']['ymax']
+        l, t, r, b = bbox['bndbox']['xmin'], bbox['bndbox']['ymin'], bbox['bndbox']['xmax'], bbox['bndbox']['ymax']
         l = int(l)
-        b = int(b)
-        r = int(r)
         t = int(t)
+        r = int(r)
+        b = int(b)
         bbox_size = (l/width, t/height, r/width, b/height)
         bbox_sizes.append(bbox_size)
         bbox_labels.append(bbox['name'])
@@ -43,6 +49,21 @@ def to_COCO_bbox(bboxes, width, height):
 # Implement a datareader for KATECH dataset
 class KATECHDetection(data.Dataset):
     def __init__(self, img_folder, transform=None):
+        '''
+        self.img_folder: root directory of dataset
+        
+        self.imgs: image files (dir, filename)
+        self.labels: label files (dir, filename)
+        self.datapoints: {dir: list of {key: image, label}}
+        
+        self.canonical_datapoints: list of (id, path, timestamp, imgfilepath, lblfilepath, scenario)
+
+        self.images: img_id -> (imgpath, (w, h), box_sizes, box_labels)
+        self.label_name_map: label name -> label number
+        self.label_info: label number -> label name
+        self.img_keys = list(self.images.keys())
+        self.transform: data transformation
+        '''
         self.img_folder = img_folder
         # self.annotate_file = None
 
@@ -59,12 +80,12 @@ class KATECHDetection(data.Dataset):
                 else:
                     pass
 
-        self.datapoints = {}
+        self.datapoints = {} # key: path to video, value: images, labels
 
         for img in self.imgs:
-            key_dir = os.path.join('/', *img['parent'].split('/')[:-1])
-            item_key = img['parent'].split('/')[-1]
-            items = img['files']
+            key_dir = os.path.join('/', *img['parent'].split('/')[:-1]) # path to one image source (video)
+            item_key = img['parent'].split('/')[-1] # cam number
+            items = img['files']    # images
             if key_dir in self.datapoints.keys():
                 if item_key in self.datapoints[key_dir].keys():
                     #Error
@@ -92,6 +113,8 @@ class KATECHDetection(data.Dataset):
         self.canonical_datapoints = []
         # Datapoint = namedtuple('Datapoint', ['vid', 'timestamp', 'imgfilepath', 'lblfilepath', 'scenario'])
 
+
+        cnt = 0 # identifier variable for each datapoint
         for (k,v) in self.datapoints.items(): 
             # e.g. 
             # k:'.../20200114_155214', 
@@ -102,24 +125,23 @@ class KATECHDetection(data.Dataset):
             #     ...}
             
             timestamp, scenario = analyze_key(k)
-            vid = k
+            path = k
 
             # simply check for the validate labels
-            if '1' in v.keys() and '2' in v.keys() and '3' in v.keys() and '1_annoatations_v001_1' in v.keys() and '2_annotations_v001_1' in v.keys() and '3_annotations_v001_1' in v.keys():
+            if '1' in v.keys() and '2' in v.keys() and '3' in v.keys() and '1_annotations_v001_1' in v.keys() and '2_annotations_v001_1' in v.keys() and '3_annotations_v001_1' in v.keys():
                 check1 = (len(v['1']) == len(v['1_annotations_v001_1']))
                 check2 = (len(v['2']) == len(v['2_annotations_v001_1']))
                 check3 = (len(v['3']) == len(v['3_annotations_v001_1']))
                 if check1 == True and check2 == True and check3 == True:
                     pass
                 else:
-                    print("3 cameras are not complete: {}".format(k))
-                    continue
+                    print("3 cameras are not complete: {}/{},{},{}".format(k,check1, check2, check3))
+                    # continue
                 pass
             else:
                 print("data points are not complete: {}".format(k))
-                #print(v.keys())
-                #continue
 
+            
             for cam_num in [1, 2, 3]:
                 imgdir = str(cam_num)
                 for imagefile in v[imgdir]:
@@ -135,9 +157,12 @@ class KATECHDetection(data.Dataset):
                     # imgfilepath = os.path.abspath(imgfilepath)
                     # lblfilepath = os.path.abspath(lblfilepath)
                     self.canonical_datapoints.append(
-                        {'vid': vid, 'timestamp':timestamp, 'imgfilepath':imgfilepath, 'lblfilepath': lblfilepath, 'scenario': scenario}
+                        {'id':cnt, 'path': path, 'timestamp':timestamp, 'imgfilepath':imgfilepath, 'lblfilepath': lblfilepath, 'scenario': scenario}
                     )
+                    cnt += 1
 
+
+        print("{} images are added to dataset".format(cnt))
 
         
         # images[key][0] = image file name (fn)
@@ -150,14 +175,16 @@ class KATECHDetection(data.Dataset):
         self.label_map = {}
         self.label_info = {} # label number -> label name
         remove_dps = []
+        
         for dp in self.canonical_datapoints:
             if dp['lblfilepath']=='NULL':
+                # remove_dps.append(dp)
                 continue
             with open(dp['lblfilepath'], 'r') as lbl:
                 ordered = xmltodict.parse(lbl.read())
                 dict_data = json.loads(json.dumps(ordered))['annotation']
                 if 'object' not in dict_data.keys():
-                    remove_dps.append(dp)                    
+                    # remove_dps.append(dp)                    
                     continue
                 
                 width = int(dict_data['size']['width'])
@@ -172,8 +199,8 @@ class KATECHDetection(data.Dataset):
                 bbox_sizes, bbox_labels = to_COCO_bbox(dict_data['object'], width, height)
                 for lbl in bbox_labels:
                     labels[lbl]=True
-                fullpath = os.path.join(dp['vid'], dict_data['folder'], dict_data['filename'])
-                self.images[dict_data['filename']] = (dict_data['filename'], (width, height), bbox_sizes, bbox_labels, fullpath)
+                fullpath = os.path.join(dp['path'], dict_data['folder'], dict_data['filename'])
+                self.images[dp['id']] = (fullpath, (width, height), bbox_sizes, bbox_labels)
         for x in remove_dps:
             self.canonical_datapoints.remove(x)
 
@@ -208,6 +235,11 @@ class KATECHDetection(data.Dataset):
         self.img_keys = list(self.images.keys())
         self.transform = transform
 
+        self._split_train_val()
+        self.images_all = self.images
+        self.status = 'all'
+
+
     @property
     def labelnum(self):
         return len(self.label_info)
@@ -222,21 +254,104 @@ class KATECHDetection(data.Dataset):
         with bz2.open(pklfile, "wb") as fout:
             pickle.dump(self, fout)
 
+    def _split_train_val(self, val_ratio=0.1):
+        num = len(self.images)
+        train_num = int(num*(1-val_ratio))
+    
+        self.image_train = {self.img_keys[i]:self.images[self.img_keys[i]] \
+        for i in range(train_num)}
+        self.image_val = {self.img_keys[i]:self.images[self.img_keys[i]] \
+        for i in range(train_num, num)}
+        
+    def set_val(self):        
+        self.status = 'val'
+        self.images = self.image_val
+        self.img_keys = list(self.image_val.keys())
 
+    def set_train(self):        
+        self.status = 'train'
+        self.images = self.image_train
+        self.img_keys = list(self.image_train.keys())
+
+    def set_all(self):        
+        self.status = 'all'
+        self.images = self.images_all
+        self.img_keys = list(self.images_all.keys())
+
+    def to_coco(self, filename):
+        info = {
+            "description": "KATECH Dataset 2021",
+            "url": "n.a.",
+            "version": "0.1",
+            "year": 2021,
+            "contributor": "ROK MOTIE Autonomous Vehicle Consortium",
+            "date_created": "2021/04/22"
+        }
+        licenses = [
+            {
+                "url":"n.a.",
+                "id": 1,
+                "name": "Private License"
+        }
+        ]
+        images = [{'license': 1, 
+                    'file_name': self.images[idx][0].split('/')[-1],
+                    'coco_url': 'n.a.',
+                    'height': self.images[idx][1][1],
+                    'width': self.images[idx][1][0],
+                    'date_captured': convert_timestamp(self.images[idx][0].split('/')[-1][2:-4]),
+                    'flickr_url': 'n.a.',
+                    'id': idx
+                    } 
+                    for idx in self.img_keys]
+
+        categories = [{'supercategory': 'TBD', 'id': k, 'name': v} for k, v in self.label_info.items() ]
+        
+        annotations = []
+        cnt = 0
+        for idx in self.img_keys:
+            bboxes = self.images[idx][2]
+            labels = self.images[idx][3]
+            for bbox, label in zip(bboxes, labels):
+                annotations.append(
+                    {
+                        "iscrowd": 0,
+                        "image_id": idx,
+                        "bbox": bbox,
+                        "category_id": self.label_name_map[label],
+                        "id": cnt
+                    }
+                )
+                cnt += 1
+        coco_annotation = {
+            'info': info,
+            'licenses': licenses,
+            'images': images,
+            'annotations': annotations,
+            'categories': categories
+        }
+        with open(filename, 'w') as f:
+            json.dump(coco_annotation, f)
+    def create_symbol_links(self, dir):
+        #TODO: inspect 'dir'
+        for idx, img in self.images.items():
+            filepath = img[0]
+            dstfilename = filepath.split('/')[-1]
+            dstfilename = os.path.join(dir, dstfilename)
+            os.symlink(filepath, dstfilename)
     def __len__(self):
         return len(self.images)
 
     def __getitem__(self, idx):
         # img_data
-        # [0]: img filename
+        # [0]: img filepath
         # [1]: (w, h)
         # [2]: bboxes (LTRB/wh) style
         # [3]: labels
-        # [4]: img filepath
 
         img_id = self.img_keys[idx]
         img_data = self.images[img_id]
-        img = Image.open(img_data[4]).convert("RGB")
+        img = Image.open(img_data[0]).convert("RGB")
 
         htot, wtot = img_data[1]
         bbox_sizes = torch.tensor(img_data[2])
@@ -264,3 +379,5 @@ class KATECHDetection(data.Dataset):
             pass
 
         return img, img_id, (htot, wtot), bbox_sizes, bbox_labels
+
+

@@ -24,11 +24,13 @@ from src.coco import COCO
 #DALI import
 from src.coco_pipeline import COCOPipeline, DALICOCOIterator
 
-
-
 def get_train_loader(args, local_seed):
-    train_annotate = os.path.join(args.data, "annotations/instances_train2017.json")
-    train_coco_root = os.path.join(args.data, "train2017")
+    if args.datatype=='katech':
+        train_annotate = os.path.join(args.data, "annotations/instances_train2021.json")
+        train_coco_root = os.path.join(args.data, "train")
+    else: # datatype == 'coco'
+        train_annotate = os.path.join(args.data, "annotations/instances_train2017.json")
+        train_coco_root = os.path.join(args.data, "train2017")
 
     train_pipe = COCOPipeline(args.batch_size, args.local_rank, train_coco_root,
                     train_annotate, args.N_gpu, num_threads=args.num_workers,
@@ -39,23 +41,11 @@ def get_train_loader(args, local_seed):
     train_loader = DALICOCOIterator(train_pipe, 118287 / args.N_gpu)
     return train_loader
 
-def get_dataset_KATECH(args):
-    KATECH_root = args.data
-    dboxes = dboxes300_coco()
-    trans = SSDTransformer(dboxes, (300,300), val=True)
-    ds_katech = KATECHDetection(KATECH_root, trans)
-    return ds_katech
-
 def get_val_dataset(args):
-    dboxes = dboxes300_coco()
-    val_trans = SSDTransformer(dboxes, (300, 300), val=True)
-
-    val_annotate = os.path.join(args.data, "annotations/instances_val2017.json")
-    val_coco_root = os.path.join(args.data, "val2017")
-
-    val_coco = COCODetection(val_coco_root, val_annotate, val_trans)
-    return val_coco
-
+    if args.datatype == "katech":
+        return _get_dataset_KATECH(args, True)
+    elif args.datatype == "coco":
+        return _get_val_dataset_COCO(args)
 
 def get_val_dataloader(dataset, args):
     if args.distributed:
@@ -72,6 +62,31 @@ def get_val_dataloader(dataset, args):
     return val_dataloader
 
 def get_coco_ground_truth(args):
-    val_annotate = os.path.join(args.data, "annotations/instances_val2017.json")
+    if args.datatype == "katech":
+        val_annotate = os.path.join(args.data, "annotations/instances_val2021.json")
+    elif args.datatype == "coco":
+        val_annotate = os.path.join(args.data, "annotations/instances_val2017.json")
     cocoGt = COCO(annotation_file=val_annotate)
     return cocoGt
+
+def _get_dataset_KATECH(args, is_val: bool):
+    dboxes = dboxes300_coco()
+    val_trans = SSDTransformer(dboxes, (300, 300), val=True)
+
+    val_annotate = os.path.join(args.data, "annotations/instances_val2021.json")
+    val_coco_root = os.path.join(args.data, "val")
+
+    val_coco = COCODetection(val_coco_root, val_annotate, val_trans)
+    return val_coco
+
+def _get_val_dataset_COCO(args):
+    dboxes = dboxes300_coco()
+    val_trans = SSDTransformer(dboxes, (300, 300), val=True)
+
+    val_annotate = os.path.join(args.data, "annotations/instances_val2017.json")
+    val_coco_root = os.path.join(args.data, "val2017")
+
+    val_coco = COCODetection(val_coco_root, val_annotate, val_trans)
+    return val_coco
+
+

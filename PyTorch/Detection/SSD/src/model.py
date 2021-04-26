@@ -53,12 +53,12 @@ class ResNet(nn.Module):
 
 
 class SSD300(nn.Module):
-    def __init__(self, backbone=ResNet('resnet50')):
+    def __init__(self, backbone=ResNet('resnet50'), num_classes = 81):
         super().__init__()
 
         self.feature_extractor = backbone
 
-        self.label_num = 81  # number of COCO classes
+        self.num_classes = num_classes  # number of COCO classes
         self._build_additional_features(self.feature_extractor.out_channels)
         self.num_defaults = [4, 6, 6, 6, 4, 4]
         self.loc = []
@@ -66,7 +66,7 @@ class SSD300(nn.Module):
 
         for nd, oc in zip(self.num_defaults, self.feature_extractor.out_channels):
             self.loc.append(nn.Conv2d(oc, nd * 4, kernel_size=3, padding=1))
-            self.conf.append(nn.Conv2d(oc, nd * self.label_num, kernel_size=3, padding=1))
+            self.conf.append(nn.Conv2d(oc, nd * self.num_classes, kernel_size=3, padding=1))
 
         self.loc = nn.ModuleList(self.loc)
         self.conf = nn.ModuleList(self.conf)
@@ -108,7 +108,7 @@ class SSD300(nn.Module):
     def bbox_view(self, src, loc, conf):
         ret = []
         for s, l, c in zip(src, loc, conf):
-            ret.append((l(s).view(s.size(0), 4, -1), c(s).view(s.size(0), self.label_num, -1)))
+            ret.append((l(s).view(s.size(0), 4, -1), c(s).view(s.size(0), self.num_classes, -1)))
 
         locs, confs = list(zip(*ret))
         locs, confs = torch.cat(locs, 2).contiguous(), torch.cat(confs, 2).contiguous()

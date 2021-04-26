@@ -77,7 +77,8 @@ def make_parser():
                         help='epochs at which to evaluate')
     parser.add_argument('--multistep', nargs='*', type=int, default=[43, 54],
                         help='epochs at which to decay learning rate')
-
+    parser.add_argument('--datasetpkl', type=str, default=None,
+                        help='path to dataset pkl file')
     # Hyperparameters
     parser.add_argument('--learning-rate', '--lr', type=float, default=2.6e-3,
                         help='learning rate')
@@ -184,7 +185,7 @@ def test(logger, args):
 
 
     # save infer result
-    with open('katect_infer_test.npy', 'wb') as f:
+    with open('katech_infer_test.npy', 'wb') as f:
         np.save(f, infer_result)
     # evaluate separately
     # TODO: other file (or notebook)

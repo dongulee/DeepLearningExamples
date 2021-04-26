@@ -60,7 +60,9 @@ def generate_mean_std(args):
 
 def make_parser():
     parser = ArgumentParser(description="Train Single Shot MultiBox Detector"
-                                        " on COCO")
+                                        " on COCO/KATECH")
+    parser.add_argument('--datatype', type=str, default='coco', required=True,
+                        help='path to test and training data files')
     parser.add_argument('--data', '-d', type=str, default='/coco', required=True,
                         help='path to test and training data files')
     parser.add_argument('--epochs', '-e', type=int, default=65,
@@ -83,7 +85,8 @@ def make_parser():
                         help='epochs at which to evaluate')
     parser.add_argument('--multistep', nargs='*', type=int, default=[43, 54],
                         help='epochs at which to decay learning rate')
-
+    parser.add_argument('--datasetpkl', type=str, default=None,
+                        help='path to dataset pkl file')
     # Hyperparameters
     parser.add_argument('--learning-rate', '--lr', type=float, default=2.6e-3,
                         help='learning rate')
@@ -105,6 +108,8 @@ def make_parser():
                              ' backbone model declared with the --backbone argument.'
                              ' When it is not provided, pretrained model from torchvision'
                              ' will be downloaded.')
+    parser.add_argument('--num-classes', type=int, default=81,
+                        help='number of classes')
     parser.add_argument('--num-workers', type=int, default=4)
     parser.add_argument('--amp', action='store_true',
                         help='Whether to enable AMP ops. When false, uses TF32 on A100 and FP32 on V100 GPUS.')
@@ -156,7 +161,7 @@ def train(train_loop_func, logger, args):
     val_dataset = get_val_dataset(args)
     val_dataloader = get_val_dataloader(val_dataset, args)
 
-    ssd300 = SSD300(backbone=ResNet(args.backbone, args.backbone_path))
+    ssd300 = SSD300(backbone=ResNet(args.backbone, args.backbone_path), num_classes=args.num_classes)
     args.learning_rate = args.learning_rate * args.N_gpu * (args.batch_size / 32)
     start_epoch = 0
     iteration = 0
