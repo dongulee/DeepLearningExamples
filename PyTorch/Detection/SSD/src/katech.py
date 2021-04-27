@@ -310,14 +310,16 @@ class KATECHDetection(data.Dataset):
         annotations = []
         cnt = 0
         for idx in self.img_keys:
-            bboxes = self.images[idx][2]
+            w, h = self.images[idx][1]
+            bboxes = self.images[idx][2] # LTRB?
             labels = self.images[idx][3]
-            for bbox, label in zip(bboxes, labels):
+            for bbox_size, label in zip(bboxes, labels):
                 annotations.append(
                     {
                         "iscrowd": 0,
                         "image_id": idx,
-                        "bbox": bbox,
+                        "area": bbox_size[0]*bbox_size[1]*w*h*0.9,
+                        "bbox": bbsize_to_xywh(bbox_size, w, h),
                         "category_id": self.label_name_map[label],
                         "id": cnt
                     }
@@ -380,4 +382,11 @@ class KATECHDetection(data.Dataset):
 
         return img, img_id, (htot, wtot), bbox_sizes, bbox_labels
 
+def bbsize_to_xywh(bbox_size, w, h):
+    # bbox_size: LTRB/w,h
+    l = bbox_size[0]*w
+    t = bbox_size[1]*h
+    r = bbox_size[2]*w
+    b = bbox_size[3]*h
+    return (l, t, r-l, b-t)
 
