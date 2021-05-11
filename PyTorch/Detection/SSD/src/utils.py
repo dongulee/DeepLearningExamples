@@ -558,6 +558,7 @@ class COCODetection(data.Dataset):
 def draw_patches(img, bboxes, labels, order="xywh", label_map={}):
 
     import matplotlib.pyplot as plt
+    plt.rcParams['figure.dpi'] = 200
     import matplotlib.patches as patches
     # Suppose bboxes in fractional coordinate:
     # cx, cy, w, h
@@ -590,6 +591,6 @@ def draw_patches(img, bboxes, labels, order="xywh", label_map={}):
         ax.add_patch(patches.Rectangle((cx-0.5*w, cy-0.5*h),
                                         w, h, fill=False, color="r"))
         bbox_props = dict(boxstyle="round", fc="y", ec="0.5", alpha=0.3)
-        ax.text(cx-0.5*w, cy-0.5*h, label, ha="center", va="center", size=15, bbox=bbox_props)
+        ax.text(cx-0.5*w, cy-0.5*h, label, ha="center", va="center", size=3, bbox=bbox_props)
     plt.show()
 

@@ -1,4 +1,5 @@
 import json
+from os.path import isfile
 import time
 import os
 import bz2
@@ -8,6 +9,7 @@ from collections import namedtuple
 import torch
 import torch.utils.data as data
 import xmltodict
+import re
 
 def analyze_key(key):
     rootdir = key.split('/')[-1]
@@ -17,15 +19,17 @@ def analyze_key(key):
         scenario = rootdir[15:]
     else:
         scenario = 'NULL'
-    timestamp = date[:4]+'-'+date[4:6]+'-'+date[6:8]+ ' ' + time[:2]+':'+time[2:4]+':'+time[4:6]
-    return timestamp, scenario
+    timestamp = '-'.join([date[:4], date[4:6], date[6:8]]) + ' ' + ':'.join([time[:2], time[2:4], time[4:6]])
+    return rootdir, timestamp, scenario
+
 def convert_timestamp(timestamp):
     year, month, day = timestamp[:4], timestamp[4:6], timestamp[6:8]
     hh, mm, ss = timestamp[9:11], timestamp[11:13], timestamp[13:15]
-    sec_bias = int(timestamp[16:])/30
+    sec_bias = int(timestamp[16:])/30   #FIXME: fractional seconds
     ss = str(int(ss)+sec_bias)
-    ts = year+'-'+month+'-'+day+' '+hh+':'+mm+':'+ss
+    ts = '-'.join([year, month, day])+' '+':'.join([hh, mm, ss])
     return ts
+    
 def to_COCO_bbox(bboxes, width, height):
     # KATECH bbox (parsed to dictionary from xml) style
     # from List of object: {'name': ABC, ... , 'bndbox':{'xmin', 'ymin', 'xmax', 'ymax'} (LTRB) style }
@@ -48,7 +52,8 @@ def to_COCO_bbox(bboxes, width, height):
 
 # Implement a datareader for KATECH dataset
 class KATECHDetection(data.Dataset):
-    def __init__(self, img_folder, transform=None):
+    
+    def __init__(self, img_folder: str, re_folder:'pattern text'=None, transform=None, ckpt: str=None):
         '''
         self.img_folder: root directory of dataset
         
@@ -64,116 +69,32 @@ class KATECHDetection(data.Dataset):
         self.img_keys = list(self.images.keys())
         self.transform: data transformation
         '''
+        if ckpt is None:
+            self.canonical_datapoints = []
+            self.images = {}
+            self.label_name_map = {}    # label name -> label number
+            self.label_map = {}
+            self.label_info = {}        # label number -> label name
+        else:
+            self.load_ckpt(ckpt)
+        
         self.img_folder = img_folder
-        # self.annotate_file = None
+        self.front_cams = ['1', '2', '3']
+        self.side_cams = ['4', '5']
+        self.rear_cams = ['6', '7']
+        self.annotation_version = 'annotations_v001_1'  # default for 2021
+
+        if re_folder == None:
+            # default rule: yyyymmdd_hhmmss 
+            self.re_folder = re.compile(r'^\d{8}_\d{6}$')
+        else:
+            self.re_folder = re.compile(re_folder)
 
         # Start processing annotation
-        self.imgs = []
-        self.labels = []
-        for cur_dir, subdirs, files in os.walk(self.img_folder):
-            if len(files) > 0:
-                # when the root is a leaf directory
-                if files[0].endswith('jpg'):
-                    self.imgs.append({'parent': cur_dir, 'files': files})
-                elif files[0].endswith('xml'):
-                    self.labels.append({'parent': cur_dir, 'files': files})
-                else:
-                    pass
-
-        self.datapoints = {} # key: path to video, value: images, labels
-
-        for img in self.imgs:
-            key_dir = os.path.join('/', *img['parent'].split('/')[:-1]) # path to one image source (video)
-            item_key = img['parent'].split('/')[-1] # cam number
-            items = img['files']    # images
-            if key_dir in self.datapoints.keys():
-                if item_key in self.datapoints[key_dir].keys():
-                    #Error
-                    print("key duplicates: {}".format(item_key))
-                else:
-                    self.datapoints[key_dir][item_key]=items
-            else:
-                self.datapoints[key_dir]={}
-                self.datapoints[key_dir][item_key]=items
-
-        for lbl in self.labels:
-            key_dir = os.path.join('/', *lbl['parent'].split('/')[:-1])
-            item_key = lbl['parent'].split('/')[-1]
-            items = lbl['files']
-            if key_dir in self.datapoints.keys():
-                if item_key in self.datapoints[key_dir].keys():
-                    #Error
-                    print("key duplicates: {}".format(item_key))
-                else:
-                    self.datapoints[key_dir][item_key]=items
-            else:
-                self.datapoints[key_dir]={}
-                self.datapoints[key_dir][item_key]=items
+        self.parse_rootdir()
         
-        self.canonical_datapoints = []
-        # Datapoint = namedtuple('Datapoint', ['vid', 'timestamp', 'imgfilepath', 'lblfilepath', 'scenario'])
-
-
-        cnt = 0 # identifier variable for each datapoint
-        for (k,v) in self.datapoints.items(): 
-            # e.g. 
-            # k:'.../20200114_155214', 
-            # v: {'1': [images ...],
-            #     '2': [images ...],
-            #     '3': [images ...],
-            #     '1_annotations_v001_1': [labels ...],
-            #     ...}
-            
-            timestamp, scenario = analyze_key(k)
-            path = k
-
-            # simply check for the validate labels
-            if '1' in v.keys() and '2' in v.keys() and '3' in v.keys() and '1_annotations_v001_1' in v.keys() and '2_annotations_v001_1' in v.keys() and '3_annotations_v001_1' in v.keys():
-                check1 = (len(v['1']) == len(v['1_annotations_v001_1']))
-                check2 = (len(v['2']) == len(v['2_annotations_v001_1']))
-                check3 = (len(v['3']) == len(v['3_annotations_v001_1']))
-                if check1 == True and check2 == True and check3 == True:
-                    pass
-                else:
-                    print("3 cameras are not complete: {}/{},{},{}".format(k,check1, check2, check3))
-                    # continue
-                pass
-            else:
-                print("data points are not complete: {}".format(k))
-
-            
-            for cam_num in [1, 2, 3]:
-                imgdir = str(cam_num)
-                for imagefile in v[imgdir]:
-                    labelfile_key = imagefile.split('.')[0] + '_v001_1.xml'
-                    lbldir = imgdir + '_annotations_v001_1'
-                    if labelfile_key in v[lbldir]:
-                        labelfile = labelfile_key
-                        lblfilepath = os.path.join(k, lbldir, labelfile)
-                    else:
-                        lblfilepath = 'NULL'
-                    imgfilepath = os.path.join(k, imgdir, imagefile)
-                    
-                    # imgfilepath = os.path.abspath(imgfilepath)
-                    # lblfilepath = os.path.abspath(lblfilepath)
-                    self.canonical_datapoints.append(
-                        {'id':cnt, 'path': path, 'timestamp':timestamp, 'imgfilepath':imgfilepath, 'lblfilepath': lblfilepath, 'scenario': scenario}
-                    )
-                    cnt += 1
-
-
-        print("{} images are added to dataset".format(cnt))
-
-        
-        # images[key][0] = image file name (fn)
-        # images[key][1] = image size
-        # images[key][2] = objects in image
-
-        self.images = {}
         labels = {}
-        self.label_name_map = {}  # label name -> label number (no label id in KATECH)
-        self.label_map = {}
-        self.label_info = {} # label number -> label name
+        
         remove_dps = []
         
         for dp in self.canonical_datapoints:
@@ -195,7 +116,7 @@ class KATECHDetection(data.Dataset):
                 elif type(dict_data['object'])==type([]):
                     pass
                 else:
-                    print("object data in label file is wrong: {}".format(lblfilepath))
+                    print("object data in label file seems to be wrong: {}".format(dp['lblfilepath']))
                 bbox_sizes, bbox_labels = to_COCO_bbox(dict_data['object'], width, height)
                 for lbl in bbox_labels:
                     labels[lbl]=True
@@ -238,7 +159,135 @@ class KATECHDetection(data.Dataset):
         self._split_train_val()
         self.images_all = self.images
         self.status = 'all'
+    
+    def parse_rootdir(self):
+        imgs = []
+        labels = []
+        for cur_dir, subdirs, files in os.walk(self.img_folder):
+            if len(files) > 0:
+                # when the root is a leaf directory
+                if files[0].endswith('jpg'):
+                    imgs.append({'parent': cur_dir, 'files': files})
+                elif files[0].endswith('xml'):
+                    labels.append({'parent': cur_dir, 'files': files})
+                else:
+                    pass
 
+        datapoints = {} # key: path to video, value: images, labels
+
+        for img in imgs:
+            key_dir = os.path.join('/', *img['parent'].split('/')[:-1]) # path to one image source (video)
+            item_key = img['parent'].split('/')[-1] # name of the sub directory
+            items = img['files']                    # images
+
+            # FIXME: change to utilize a master database
+            if self.re_folder.match(key_dir) == False:
+                print("violation of a directory naming rule: {}".format(item_key))
+                continue
+            if key_dir in datapoints.keys():
+                if item_key in datapoints[key_dir].keys():
+                    # Error which cannot happen because 'item_keys' are in same dir
+                    print("key duplicates: {}".format(item_key))
+                else:
+                    datapoints[key_dir][item_key]=items
+            else:
+                datapoints[key_dir]={}
+                datapoints[key_dir][item_key]=items
+
+        for lbl in labels:
+            key_dir = os.path.join('/', *lbl['parent'].split('/')[:-1])
+            item_key = lbl['parent'].split('/')[-1]
+            items = lbl['files']
+            if key_dir in datapoints.keys():
+                if item_key in datapoints[key_dir].keys():
+                    #Error
+                    print("key duplicates: {}".format(item_key))
+                else:
+                    datapoints[key_dir][item_key]=items
+            else:
+                datapoints[key_dir]={}
+                datapoints[key_dir][item_key]=items
+
+        cnt = 0 # identifier variable for each datapoint
+        for (k,v) in datapoints.items(): 
+            # e.g. 
+            # k:'.../20200114_155214', 
+            # v: {'1': [images ...],
+            #     '2': [images ...],
+            #     '3': [images ...],
+            #     '1_annotations_v001_1': [labels ...],
+            #     ...}
+            
+            vid, timestamp, scenario = analyze_key(k)
+            path = k
+            err_flag = False
+            # simply check for the validate labels
+            subdirs = list(v.keys())
+            cams = [d for d in subdirs if d.find(self.annotation_version) < 0]
+            cams.sort()
+            anns = [d for d in subdirs if d.find(self.annotation_version) > 0]
+            anns.sort()
+
+            if len(cams)!=len(anns):
+                print("camera and label are mis-matching in a path: {}".format(k))
+                continue
+            # Matching image and label file
+            for i in range(len(cams)):
+                if '_'.join(cams[i], self.annotation_version) not in anns:
+                    print("annotation dir for {} does not exist: {}".format(cams[i], k))
+                    err_flag = True
+                if len(v[cams[i]]) != len(v[anns[i]]):
+                    print("annotation files for {}/{} are not complete".format(k,cams[i]))
+            
+            if err_flag == True:
+                continue
+                
+            for i in range(len(cams)):
+                imgfiles = v[cams[i]]
+                lblfiles = v[anns[i]]
+                for imgfile in imgfiles:
+                    lblfile_name = imgfile.split('.')[0] + '_v001_1.xml'
+                    if lblfile_name in lblfiles:
+                        lblfile = lblfile_name
+                        lblfilepath = os.path.join(k, anns[i], lblfile)
+                    else:
+                        lblfilepath = 'NULL'
+                    imgfilepath = os.path.join(k, cams[i], imgfile)
+
+                    self.canonical_datapoints.append(
+                        {
+                            'id': cnt,
+                            'vid': vid,
+                            'path': path,
+                            'timestamp': timestamp,
+                            'imgfile': imgfile,
+                            'lblfile': lblfile,
+                            'imgfilepath': imgfilepath,
+                            'lblfilepath': lblfilepath,
+                            'scenario': scenario
+                        }
+                    )
+                    cnt += 1
+  
+            # (old) Matching image and label file
+            # for cam_num in self.front_cams:
+            #     imgdir = str(cam_num)
+            #     for imagefile in v[imgdir]:
+            #         labelfile_key = imagefile.split('.')[0] + '_v001_1.xml'
+            #         lbldir = imgdir + self.annotation_version
+            #         if labelfile_key in v[lbldir]:
+            #             labelfile = labelfile_key
+            #             lblfilepath = os.path.join(k, lbldir, labelfile)
+            #         else:
+            #             lblfilepath = 'NULL'
+            #         imgfilepath = os.path.join(k, imgdir, imagefile)
+
+            #         self.canonical_datapoints.append(
+            #             {'id':cnt, 'vid':vid, 'path': path, 'timestamp':timestamp, 'imgfilepath':imgfilepath, 'lblfilepath': lblfilepath, 'scenario': scenario}
+            #         )
+            #         cnt += 1
+
+        print("{} images are added to dataset".format(cnt))
 
     @property
     def labelnum(self):
@@ -249,6 +298,20 @@ class KATECHDetection(data.Dataset):
         with bz2.open(pklfile, "rb") as fin:
             ret = pickle.load(fin)
         return ret
+
+    def load_ckpt(self, ckpt):
+        # load canonical datapoints from db or file
+        if isfile(ckpt):
+            # load from file
+            data = self.load(ckpt)
+            self.canonical_datapoints = data.canonical_datapoints
+            self.images = data.images
+            self.label_name_map = data.images
+            self.label_map = data.label_map
+            self.label_info = data.label_info
+        else:
+            #load from db
+            pass #TODO:
 
     def save(self, pklfile):
         with bz2.open(pklfile, "wb") as fout:
@@ -334,6 +397,16 @@ class KATECHDetection(data.Dataset):
         }
         with open(filename, 'w') as f:
             json.dump(coco_annotation, f)
+
+    def change_imgdir(self, imgdir):
+        sub = self.img_folder
+        self.set_all()
+        print(len(self))
+        self.images = {k:(v[0].replace(sub,imgdir), v[1], v[2], v[3])
+                        for k, v in self.images.items()}
+        self._split_train_val()
+        self.img_folder = imgdir
+
     def create_symbol_links(self, dir):
         #TODO: inspect 'dir'
         for idx, img in self.images.items():
@@ -343,6 +416,14 @@ class KATECHDetection(data.Dataset):
             os.symlink(filepath, dstfilename)
     def __len__(self):
         return len(self.images)
+
+    def get_patch(self, obj: 'coco annotation'):
+        img_id = obj['image_id']
+        x, y, w, h = obj['bbox']
+        bbox = (x, y, x+w, y+h)
+        img_data = self.images[img_id]
+        img = Image.open(img_data[0]).convert("RGB")
+        return img, img.crop(bbox)
 
     def __getitem__(self, idx):
         # img_data

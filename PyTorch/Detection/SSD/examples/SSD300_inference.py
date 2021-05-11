@@ -15,7 +15,7 @@
 import torch
 import numpy as np
 
-from apex.fp16_utils import network_to_half
+# from apex.fp16_utils import network_to_half
 
 from dle.inference import prepare_input
 from src.model import SSD300, ResNet
@@ -27,8 +27,8 @@ def load_checkpoint(model, model_file):
     model.load_state_dict(cp)
 
 
-def build_predictor(model_file, backbone='resnet50'):
-    ssd300 = SSD300(backbone=ResNet(backbone))
+def build_predictor(model_file, backbone='resnet50', num_class=80):
+    ssd300 = SSD300(backbone=ResNet(backbone), num_classes=num_class)
     load_checkpoint(ssd300, model_file)
 
     return ssd300
@@ -37,7 +37,7 @@ def build_predictor(model_file, backbone='resnet50'):
 def prepare_model(checkpoint_path):
     ssd300 = build_predictor(checkpoint_path)
     ssd300 = ssd300.cuda()
-    ssd300 = network_to_half(ssd300)
+    # ssd300 = network_to_half(ssd300)
     ssd300 = ssd300.eval()
 
     return ssd300

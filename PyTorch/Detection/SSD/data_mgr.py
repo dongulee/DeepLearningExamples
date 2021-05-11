@@ -1,7 +1,7 @@
 from src.katech import KATECHDetection
 
 def main():
-    katech = KATECHDetection.load('katech_ckpt.pkl')
+    katech = KATECHDetection('/home/dklee/data/KATECH')
     
 
 if __name__=="__main__":
