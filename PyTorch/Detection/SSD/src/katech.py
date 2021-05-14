@@ -10,6 +10,44 @@ import torch
 import torch.utils.data as data
 import xmltodict
 import re
+from tqdm import tqdm
+
+DEFAULT_LABEL_NAMES=[  
+        'background',
+        'Lane_Blue_Solid',
+        'Lane_White_Dash',
+        'Lane_White_Solid',
+        'Lane_Yellow_Solid',
+        'Pedestrian_Bicycle',
+        'Pedestrian_Pedestrian',
+        'RoadMark_Character',
+        'RoadMark_Crosswalk',
+        'RoadMark_Number',
+        'RoadMark_StopLine',
+        'RoadMarkArrow_Else',
+        'RoadMarkArrow_Left',
+        'RoadMarkArrow_Right',
+        'RoadMarkArrow_Straight',
+        'RoadMarkArrow_StraightLeft',
+        'RoadMarkArrow_StraightRight',
+        'RoadMarkArrow_Uturn',
+        'TrafficLight_Arrow',
+        'TrafficLight_Green',
+        'TrafficLight_GreenArrow',
+        'TrafficLight_Red',
+        'TrafficLight_RedArrow',
+        'TrafficLight_Yellow',
+        'TrafficLight_YellowArrow',
+        'TrafficSign_Else',
+        'TrafficSign_Speed',
+        'Vehicle',
+        'Vehicle_Bus',
+        'Vehicle_Car',
+        'Vehicle_Motorcycle',
+        'Vehicle_Unknown',
+        'None',
+        ]
+DEFAULT_LABEL_NAME_MAP={k:DEFAULT_LABEL_NAMES.index(k) for k in DEFAULT_LABEL_NAMES}  
 
 def analyze_key(key):
     rootdir = key.split('/')[-1]
@@ -22,12 +60,16 @@ def analyze_key(key):
     timestamp = '-'.join([date[:4], date[4:6], date[6:8]]) + ' ' + ':'.join([time[:2], time[2:4], time[4:6]])
     return rootdir, timestamp, scenario
 
-def convert_timestamp(timestamp):
-    year, month, day = timestamp[:4], timestamp[4:6], timestamp[6:8]
-    hh, mm, ss = timestamp[9:11], timestamp[11:13], timestamp[13:15]
-    sec_bias = int(timestamp[16:])/30   #FIXME: fractional seconds
+def convert_timestamp(filename):
+    """
+    filename: <cam>_yyyymmdd_hhmmss_<frame>
+    """
+    ymd, hms, frames = filename[:-4].split('_')[1:]
+    y, m, d= ymd[:4], ymd[4:6], ymd[6:8] 
+    hh, mm, ss = hms[:2], hms[2:4], hms[4:6] 
+    sec_bias = int(frames)/30   #FIXME: fractional seconds
     ss = str(int(ss)+sec_bias)
-    ts = '-'.join([year, month, day])+' '+':'.join([hh, mm, ss])
+    ts = '-'.join([y, m, d])+' '+':'.join([hh, mm, ss])
     return ts
     
 def to_COCO_bbox(bboxes, width, height):
@@ -72,9 +114,9 @@ class KATECHDetection(data.Dataset):
         if ckpt is None:
             self.canonical_datapoints = []
             self.images = {}
-            self.label_name_map = {}    # label name -> label number
-            self.label_map = {}
-            self.label_info = {}        # label number -> label name
+            self.label_name_map = DEFAULT_LABEL_NAME_MAP
+            self.label_map = {v:v for k, v in self.label_name_map.items()}  # default: identical map
+            self.label_info = {v:k for k, v in self.label_name_map.items()} # label number -> label name
         else:
             self.load_ckpt(ckpt)
         
@@ -97,7 +139,9 @@ class KATECHDetection(data.Dataset):
         
         remove_dps = []
         
-        for dp in self.canonical_datapoints:
+        cdp_pbar = tqdm(self.canonical_datapoints)
+        for dp in cdp_pbar:
+            cdp_pbar.set_description("Processing {}".format(dp['imgfilepath']))
             if dp['lblfilepath']=='NULL':
                 # remove_dps.append(dp)
                 continue
@@ -125,6 +169,8 @@ class KATECHDetection(data.Dataset):
         for x in remove_dps:
             self.canonical_datapoints.remove(x)
 
+
+        
         cnt = 0
         self.label_info[cnt] = "background"
         for cat in labels.keys():
@@ -233,7 +279,7 @@ class KATECHDetection(data.Dataset):
                 continue
             # Matching image and label file
             for i in range(len(cams)):
-                if '_'.join(cams[i], self.annotation_version) not in anns:
+                if '_'.join([cams[i], self.annotation_version]) not in anns:
                     print("annotation dir for {} does not exist: {}".format(cams[i], k))
                     err_flag = True
                 if len(v[cams[i]]) != len(v[anns[i]]):
@@ -362,7 +408,7 @@ class KATECHDetection(data.Dataset):
                     'coco_url': 'n.a.',
                     'height': self.images[idx][1][1],
                     'width': self.images[idx][1][0],
-                    'date_captured': convert_timestamp(self.images[idx][0].split('/')[-1][2:-4]),
+#                    'date_captured': convert_timestamp(self.images[idx][0].split('/')[-1]),
                     'flickr_url': 'n.a.',
                     'id': idx
                     } 

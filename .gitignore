@@ -2,6 +2,8 @@ repos.cfg
 repos_init.cfg
 nvtool*
 **/__pycache__
+**/*.pyc
+instances*.json
 *.pkl
 .vscode/
 .ipynb_checkpoints/

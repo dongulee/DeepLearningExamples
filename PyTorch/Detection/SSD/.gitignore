@@ -1,7 +1,9 @@
 **/__pycache__
+**/*.pyc
 *.pkl
 .vscode/
 .ipynb_checkpoints/
 models/
 *.npy
 Untitled.ipynb
+instances*
