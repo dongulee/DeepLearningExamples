@@ -420,11 +420,23 @@ class KATECHDetection(data.Dataset):
         for i in range(train_num, num)}
         
     def set_val(self):        
+        if self.status == 'all':
+            self.images_all = self.images
+        elif self.status == 'train':
+            self.image_train = self.images
+        elif self.status == 'val':
+            return 
         self.status = 'val'
         self.images = self.image_val
         self.img_keys = list(self.image_val.keys())
 
-    def set_train(self):        
+    def set_train(self):   
+        if self.status == 'all':
+            self.images_all = self.images
+        elif self.status == 'val':
+            self.image_val = self.images
+        elif self.status == 'train':
+            return 
         self.status = 'train'
         self.images = self.image_train
         self.img_keys = list(self.image_train.keys())
