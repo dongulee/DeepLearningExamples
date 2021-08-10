@@ -110,11 +110,13 @@ def analyze_key(key):
 
 def convert_timestamp(filename):
     """
-    filename: <cam>_yyyymmdd_hhmmss_<frame>
+    filename: <cam>_yyyymmdd_hhmmss_(I1)?<frame>
     """
     ymd, hms, frames = filename[:-4].split('_')[1:]
     y, m, d= ymd[:4], ymd[4:6], ymd[6:8] 
     hh, mm, ss = hms[:2], hms[2:4], hms[4:6] 
+    if frames[0]=='I':
+        frames = frames[2:]
     sec_bias = int(frames)/30   #FIXME: fractional seconds
     ss = str(int(ss)+sec_bias)
     ts = '-'.join([y, m, d])+' '+':'.join([hh, mm, ss])
@@ -205,6 +207,7 @@ class KATECHDetection(data.Dataset):
                 ordered = xmltodict.parse(lbl.read())
                 dict_data = json.loads(json.dumps(ordered))['annotation']
                 if 'object' not in dict_data.keys():
+                    # No Objects
                     # remove_dps.append(dp)                    
                     continue
                 
@@ -446,7 +449,7 @@ class KATECHDetection(data.Dataset):
         self.images = self.images_all
         self.img_keys = list(self.images_all.keys())
 
-    def to_coco(self, filename):
+    def to_coco(self, filename=None):      
         info = {
             "description": "KATECH Dataset 2021",
             "url": "n.a.",
@@ -467,7 +470,7 @@ class KATECHDetection(data.Dataset):
                     'coco_url': 'n.a.',
                     'height': self.images[idx][1][1],
                     'width': self.images[idx][1][0],
-#                    'date_captured': convert_timestamp(self.images[idx][0].split('/')[-1]),
+#                    'date_captured'x: convert_timestamp(self.images[idx][0].split('/')[-1]),
                     'flickr_url': 'n.a.',
                     'id': idx
                     } 
@@ -500,9 +503,11 @@ class KATECHDetection(data.Dataset):
             'annotations': annotations,
             'categories': categories
         }
+        if filename==None:
+            return coco_annotation
         with open(filename, 'w') as f:
             json.dump(coco_annotation, f)
-
+        
     def change_imgdir(self, imgdir):
         sub = self.img_folder
         self.set_all()
